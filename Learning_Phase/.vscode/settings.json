@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "stdio.h": "c",
+        "stdlib.h": "c",
+        "vmlinux.h": "c",
+        "bpf.h": "c"
+    }
+}
