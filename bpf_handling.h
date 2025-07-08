@@ -64,6 +64,7 @@ public:
         skel = watchdog__open_and_load();
         if (!skel) {
             std::cerr << "Failed to load BPF skeleton" << std::endl;
+            running = 0;
             return;
         }
 
@@ -71,6 +72,7 @@ public:
         if (err) {
             std::cerr << "Failed to attach BPF program: " << err << std::endl;
             watchdog__destroy(skel);
+            running = 0;
             return;
         }
 

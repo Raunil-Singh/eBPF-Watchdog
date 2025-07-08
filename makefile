@@ -11,7 +11,7 @@ VMLINUX        := vmlinux.h
 CLANG         := clang
 GPP           := g++
 CFLAGS        := -O2 -g -Wall
-BPF_CFLAGS    := -target bpf -O2 -g -mllvm -bpf-stack-size=512 -I/usr/include/bpf -I/usr/include/linux
+BPF_CFLAGS    := -target bpf -O2 -g -mllvm -bpf-stack-size=512 -I/usr/include/bpf -I/usr/include/linux -D__TARGET_ARCH_x86
 
 # Libs
 LDFLAGS       := -lbpf -lpthread -lstdc++fs
