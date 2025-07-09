@@ -2,14 +2,9 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-char LICENSE[] SEC("license") = "GPL";
+#include "event_header.h"
 
-struct event {
-    __u32 pid;
-    char command[16];
-    char filename[256];
-    int opcode;
-};
+char LICENSE[] SEC("license") = "GPL";
 
 struct fd_key {
     int fd;
