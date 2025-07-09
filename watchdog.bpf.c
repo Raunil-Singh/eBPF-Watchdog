@@ -31,114 +31,36 @@ struct {
     __type(value, char[256]);
 } pending_open_files SEC(".maps");
 
-// sys_enter_openat context
-struct openat_ctx {
-    __u64 __unused_syscall_header1;
-    __u64 __unused_syscall_header2;
-    int syscall_nr;
-    int dfd;
-    const char *filename;
-    int flags;
-    __u16 mode;
-};
-
-// sys_exit_openat context
-struct exit_openat_ctx {
-    __u64 pad;
-    int syscall_nr;
-    long ret;
-};
-
-// sys_enter_close context
-struct close_ctx {
-    __u64 __unused_syscall_header1;
-    int syscall_nr;
-    int fd;
-};
-
-// sys_enter_unlinkat context
-struct unlinkat_ctx {
-    __u64 __unused_syscall_header1;
-    __u64 __unused_syscall_header2;
-    int syscall_nr;
-    int dfd;
-    const char *pathname;
-    int flags;
-};
-
-// sys_enter_renameat2 context
-struct renameat2_ctx {
-    __u64 __unused_syscall_header1;
-    __u64 __unused_syscall_header2;
-    int syscall_nr;
-    int olddfd;
-    const char *oldname;
-    int newdfd;
-    const char *newname;
-    int flags;
-};
-
-// sys_enter_fchmodat context
-struct fchmodat_ctx {
-    __u64 __unused_syscall_header1;
-    __u64 __unused_syscall_header2;
-    int syscall_nr;
-    int dfd;
-    const char *filename;
-    __u32 mode;
-};
-
-// sys_enter_fchownat context
-struct fchownat_ctx {
-    __u64 __unused_syscall_header1;
-    __u64 __unused_syscall_header2;
-    int syscall_nr;
-    int dfd;
-    const char *filename;
-    __u32 uid;
-    __u32 gid;
-    int flags;
-};
-
-enum event_opcode {
-    EVENT_OPEN = 0,
-    EVENT_UNLINK = 1,
-    EVENT_RENAME = 2,
-    EVENT_RENAMED = 3,
-    EVENT_FCHMODAT = 4,
-    EVENT_FCHOWNAT = 5
-};
-
 SEC("tp/syscalls/sys_enter_openat")
-int handle_openat(struct openat_ctx *ctx) {
+int handle_openat(struct trace_event_raw_sys_enter *ctx) {
     struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event) return 0;
+    
     event->opcode = EVENT_OPEN;
-
-    // Fill in event details
     event->pid = bpf_get_current_pid_tgid() >> 32;
     bpf_get_current_comm(&event->command, sizeof(event->command));
-    bpf_probe_read_user_str(event->filename, sizeof(event->filename), ctx->filename);
+    
+    // For openat: args[0]=dfd, args[1]=filename, args[2]=flags, args[3]=mode
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[1]);
 
     // Save filename in pending_open_files keyed by tid
     __u64 tid = bpf_get_current_pid_tgid();
     char filename[256];
-    bpf_probe_read_user_str(filename, sizeof(filename), ctx->filename);
+    bpf_probe_read_user_str(filename, sizeof(filename), (void *)ctx->args[1]);
     bpf_map_update_elem(&pending_open_files, &tid, filename, BPF_ANY);
 
-    // Submit the event to the ring buffer
     bpf_ringbuf_submit(event, 0);
-
     return 0;
-
 }
 
 SEC("tp/syscalls/sys_exit_openat")
-int handle_exit_openat(struct exit_openat_ctx *ctx) {
+int handle_exit_openat(struct trace_event_raw_sys_exit *ctx) {
     if (ctx->ret < 0) return 0;
+    
     __u64 tid = bpf_get_current_pid_tgid();
     char *filename = bpf_map_lookup_elem(&pending_open_files, &tid);
     if (!filename) return 0;
+    
     int pid = tid >> 32;
     struct fd_key key = {.fd = ctx->ret, .pid = pid};
     bpf_map_update_elem(&fd_to_filename, &key, filename, BPF_ANY);
@@ -148,70 +70,144 @@ int handle_exit_openat(struct exit_openat_ctx *ctx) {
 }
 
 SEC("tp/syscalls/sys_enter_unlinkat")
-int handle_unlinkat(struct unlinkat_ctx *ctx) {
+int handle_unlinkat(struct trace_event_raw_sys_enter *ctx) {
     bpf_printk("handle_unlinkat called\n");
+    
     struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event) return 0;
+    
     event->opcode = EVENT_UNLINK;
     event->pid = bpf_get_current_pid_tgid() >> 32;
     bpf_get_current_comm(&event->command, sizeof(event->command));
-    bpf_probe_read_user_str(event->filename, sizeof(event->filename), ctx->pathname);
+    
+    // For unlinkat: args[0]=dfd, args[1]=pathname, args[2]=flags
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[1]);
+    
     bpf_ringbuf_submit(event, 0);
     return 0;
 }
 
 SEC("tp/syscalls/sys_enter_renameat2")
-int handle_renameat2(struct renameat2_ctx *ctx) {
+int handle_renameat2(struct trace_event_raw_sys_enter *ctx) {
     bpf_printk("handle_renameat2 called\n");
+    
+    // First event for old name
     struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event) return 0;
+    
     event->opcode = EVENT_RENAME;
     event->pid = bpf_get_current_pid_tgid() >> 32;
     bpf_get_current_comm(&event->command, sizeof(event->command));
-    bpf_probe_read_user_str(event->filename, sizeof(event->filename), ctx->oldname);
+    
+    // For renameat2: args[0]=olddfd, args[1]=oldname, args[2]=newdfd, args[3]=newname, args[4]=flags
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[1]);
     bpf_ringbuf_submit(event, 0);
+    
+    // Second event for new name
     event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event) return 0;
+    
     event->opcode = EVENT_RENAMED;
     event->pid = bpf_get_current_pid_tgid() >> 32;
     bpf_get_current_comm(&event->command, sizeof(event->command));
-    bpf_probe_read_user_str(event->filename, sizeof(event->filename), ctx->newname);
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[3]);
     bpf_ringbuf_submit(event, 0);
+    
     return 0;
 }
 
 SEC("tp/syscalls/sys_enter_fchmodat")
-int handle_fchmodat(struct fchmodat_ctx *ctx) {
+int handle_fchmodat(struct trace_event_raw_sys_enter *ctx) {
     bpf_printk("handle_fchmodat called\n");
+    
     struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event) return 0;
+    
     event->opcode = EVENT_FCHMODAT;
     event->pid = bpf_get_current_pid_tgid() >> 32;
     bpf_get_current_comm(&event->command, sizeof(event->command));
-    bpf_probe_read_user_str(event->filename, sizeof(event->filename), ctx->filename);
+    
+    // For fchmodat: args[0]=dfd, args[1]=filename, args[2]=mode
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[1]);
+    
     bpf_ringbuf_submit(event, 0);
     return 0;
 }
 
 SEC("tp/syscalls/sys_enter_fchownat")
-int handle_fchownat(struct fchownat_ctx *ctx) {
+int handle_fchownat(struct trace_event_raw_sys_enter *ctx) {
     bpf_printk("handle_fchownat called\n");
+    
     struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event) return 0;
+    
     event->opcode = EVENT_FCHOWNAT;
     event->pid = bpf_get_current_pid_tgid() >> 32;
     bpf_get_current_comm(&event->command, sizeof(event->command));
-    bpf_probe_read_user_str(event->filename, sizeof(event->filename), ctx->filename);
+    
+    // For fchownat: args[0]=dfd, args[1]=filename, args[2]=user, args[3]=group, args[4]=flags
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[1]);
+    
     bpf_ringbuf_submit(event, 0);
     return 0;
 }
 
 SEC("tp/syscalls/sys_enter_close")
-int handle_close(struct close_ctx *ctx) {
+int handle_close(struct trace_event_raw_sys_enter *ctx) {
     bpf_printk("handle_close called\n");
+    
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    struct fd_key key = {.fd = ctx->fd, .pid = pid};
+    // For close: args[0]=fd
+    struct fd_key key = {.fd = ctx->args[0], .pid = pid};
     bpf_map_delete_elem(&fd_to_filename, &key);
     return 0;
 }
 
+// Additional handlers for common file operations that might be missing
+
+SEC("tp/syscalls/sys_enter_unlink")
+int handle_unlink(struct trace_event_raw_sys_enter *ctx) {
+    bpf_printk("handle_unlink called\n");
+    
+    struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event) return 0;
+    
+    event->opcode = EVENT_UNLINK;
+    event->pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_get_current_comm(&event->command, sizeof(event->command));
+    
+    // For unlink: args[0]=pathname
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[0]);
+    
+    bpf_ringbuf_submit(event, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_rename")
+int handle_rename(struct trace_event_raw_sys_enter *ctx) {
+    bpf_printk("handle_rename called\n");
+    
+    // First event for old name
+    struct event *event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event) return 0;
+    
+    event->opcode = EVENT_RENAME;
+    event->pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_get_current_comm(&event->command, sizeof(event->command));
+    
+    // For rename: args[0]=oldname, args[1]=newname
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[0]);
+    bpf_ringbuf_submit(event, 0);
+    
+    // Second event for new name
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event) return 0;
+    
+    event->opcode = EVENT_RENAMED;
+    event->pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_get_current_comm(&event->command, sizeof(event->command));
+    bpf_probe_read_user_str(event->filename, sizeof(event->filename), (void *)ctx->args[1]);
+    bpf_ringbuf_submit(event, 0);
+    
+    return 0;
+}
