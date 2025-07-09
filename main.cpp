@@ -10,7 +10,14 @@
 #include "bpf_handling.h"
 
 std::unordered_map<std::string, file_logs*> watchlist;
-
+std::string op_map[] = {
+    "OPEN",
+    "WRITE",
+    "UNLINK",
+    "RENAME",
+    "CHMOD",
+    "CHOWN"
+};
 int running = 1;
 
 void handle_signal(int sig) {

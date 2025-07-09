@@ -10,15 +10,11 @@
 #include <fcntl.h>
 #include "watchdog.skel.h"
 #include "file_logs.h"
+#include "event_header.h"
 
-struct event {
-    unsigned int pid;
-    char command[16];
-    char filename[256];
-    int opcode;
-};
 extern int running;
 extern std::unordered_map<std::string, file_logs*> watchlist;
+extern std::string op_map[];
 
 class BPF_Handler {
 public:
@@ -31,7 +27,7 @@ public:
 
         for (auto& [watch_item, obj] : watchlist) {
             if (filename.substr(0, watch_item.size()) == watch_item) {
-                obj->add_event(filename, event->pid, command, event->opcode);
+                obj->add_event(filename, event->pid, command, op_map[event->opcode]);
             }
         }
 

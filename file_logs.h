@@ -10,7 +10,7 @@ struct logged_event {
     unsigned int pid;
     std::string command;
     std::string filename; // Added to store the filename
-    int opcode;
+    std::string operation;
 };
 
 class file_logs {
@@ -25,12 +25,12 @@ class file_logs {
         file_logs(std::string fname) : directory(fname) {}
 
         // Add a new file_logs instance for a given filename
-        void add_event(std::string filename, unsigned int pid, std::string command, int opcode) {
+        void add_event(std::string filename, unsigned int pid, std::string command, std::string operation) {
             logged_event ev = {
                 .pid = pid,
                 .command = command,
                 .filename = filename, // Store the filename in the event
-                .opcode = opcode
+                .operation = operation
             };
             std::lock_guard<std::mutex> lock(mtx);
             event_queue.push_back(ev);
@@ -46,7 +46,7 @@ class file_logs {
                     output_string += "Event: filename : " + ev.filename 
                                     + "\n\t\tPID : " + std::to_string(ev.pid)  
                                     + "\n\t\tCommand : " + ev.command
-                                    + "\n\t\tOpcode : " + std::to_string(ev.opcode) + "\n";
+                                    + "\n\t\tOpcode : " + ev.operation + "\n";
 
                 }
             }
